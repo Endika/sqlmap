@@ -97,7 +97,6 @@ from lib.core.settings import DEFAULT_COOKIE_DELIMITER
 from lib.core.settings import DEFAULT_GET_POST_DELIMITER
 from lib.core.settings import DEFAULT_MSSQL_SCHEMA
 from lib.core.settings import DESCRIPTION
-from lib.core.settings import DUMMY_SQL_INJECTION_CHARS
 from lib.core.settings import DUMMY_USER_INJECTION
 from lib.core.settings import DYNAMICITY_MARK_LENGTH
 from lib.core.settings import ERROR_PARSING_REGEXES
@@ -566,14 +565,14 @@ def paramToDict(place, parameters=None):
                 parts[-1] = parts[-1].rstrip()
 
             condition = not conf.testParameter
-            condition |= parameter in conf.testParameter
+            condition |= conf.testParameter is not None and parameter in conf.testParameter
             condition |= place == PLACE.COOKIE and len(intersect((PLACE.COOKIE,), conf.testParameter, True)) > 0
 
             if condition:
                 testableParameters[parameter] = "=".join(parts[1:])
                 if not conf.multipleTargets and not (conf.csrfToken and parameter == conf.csrfToken):
                     _ = urldecode(testableParameters[parameter], convall=True)
-                    if (_.strip(DUMMY_SQL_INJECTION_CHARS) != _\
+                    if (_.endswith("'") and _.count("'") == 1
                       or re.search(r'\A9{3,}', _) or re.search(DUMMY_USER_INJECTION, _))\
                       and not parameter.upper().startswith(GOOGLE_ANALYTICS_COOKIE_PREFIX):
                         warnMsg = "it appears that you have provided tainted parameter values "
@@ -1564,8 +1563,8 @@ def safeStringFormat(format_, params):
     """
     Avoids problems with inappropriate string format strings
 
-    >>> safeStringFormat('foobar%d%s', ('1', 2))
-    u'foobar12'
+    >>> safeStringFormat('SELECT foo FROM %s LIMIT %d', ('bar', '1'))
+    u'SELECT foo FROM bar LIMIT 1'
     """
 
     if format_.count(PAYLOAD_DELIMITER) == 2:
@@ -2511,6 +2510,9 @@ def findDynamicContent(firstPage, secondPage):
     This function checks if the provided pages have dynamic content. If they
     are dynamic, proper markings will be made
     """
+
+    if not firstPage or not secondPage:
+        return
 
     infoMsg = "searching for dynamic content"
     logger.info(infoMsg)

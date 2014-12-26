@@ -986,6 +986,11 @@ def _setTamperingFunctions():
                 errMsg += "in tamper script '%s'" % tfile
                 raise SqlmapGenericException(errMsg)
 
+        if kb.tamperFunctions and len(kb.tamperFunctions) > 3:
+            warnMsg = "using too many tamper scripts is usually not "
+            warnMsg += "a good idea"
+            logger.warning(warnMsg)
+
         if resolve_priorities and priorities:
             priorities.sort(reverse=True)
             kb.tamperFunctions = []
@@ -2185,7 +2190,7 @@ def _basicOptionValidation():
         errMsg = "switch '--predict-output' is incompatible with option '--threads' and switch '-o'"
         raise SqlmapSyntaxException(errMsg)
 
-    if conf.threads > MAX_NUMBER_OF_THREADS:
+    if conf.threads > MAX_NUMBER_OF_THREADS and not conf.get("skipThreadCheck"):
         errMsg = "maximum number of used threads is %d avoiding potential connection issues" % MAX_NUMBER_OF_THREADS
         raise SqlmapSyntaxException(errMsg)
 
