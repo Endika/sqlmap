@@ -1079,7 +1079,12 @@ def _setHTTPProxy():
     debugMsg = "setting the HTTP/SOCKS proxy for all HTTP requests"
     logger.debug(debugMsg)
 
-    _ = urlparse.urlsplit(conf.proxy)
+    try:
+        _ = urlparse.urlsplit(conf.proxy)
+    except Exception, ex:
+        errMsg = "invalid proxy address '%s' ('%s')" % (conf.proxy, ex)
+        raise SqlmapSyntaxException, errMsg
+
     hostnamePort = _.netloc.split(":")
 
     scheme = _.scheme.upper()
@@ -2181,6 +2186,13 @@ def _basicOptionValidation():
     if conf.regexp and conf.nullConnection:
         errMsg = "option '--regexp' is incompatible with switch '--null-connection'"
         raise SqlmapSyntaxException(errMsg)
+
+    if conf.regexp:
+        try:
+            re.compile(conf.regexp)
+        except re.error, ex:
+            errMsg = "invalid regular expression '%s' ('%s')" % (conf.regexp, ex)
+            raise SqlmapSyntaxException(errMsg)
 
     if conf.dumpTable and conf.dumpAll:
         errMsg = "switch '--dump' is incompatible with switch '--dump-all'"
