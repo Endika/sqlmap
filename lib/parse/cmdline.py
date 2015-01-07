@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2014 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -675,10 +675,6 @@ def cmdLineParser():
 
         miscellaneous.add_option("--beep", dest="beep", action="store_true",
                                   help="Make a beep sound when SQL injection is found")
-
-        miscellaneous.add_option("--check-waf", dest="checkWaf",
-                                  action="store_true",
-                                  help="Heuristically check for WAF/IPS/IDS protection")
 
         miscellaneous.add_option("--cleanup", dest="cleanup",
                                   action="store_true",

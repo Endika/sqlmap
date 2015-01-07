@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2014 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -263,10 +263,6 @@ class Connect(object):
         # support those by default
         url = asciifyUrl(url)
 
-        # fix for known issues when using url in unicode format
-        # (e.g. UnicodeDecodeError: "url = url + '?' + query" in redirect case)
-        url = unicodeencode(url)
-
         try:
             socket.setdefaulttimeout(timeout)
 
@@ -353,6 +349,7 @@ class Connect(object):
                 del headers[key]
                 headers[unicodeencode(key, kb.pageEncoding)] = unicodeencode(item, kb.pageEncoding)
 
+            url = unicodeencode(url)
             post = unicodeencode(post, kb.pageEncoding)
 
             if method and method not in (HTTPMETHOD.GET, HTTPMETHOD.POST):

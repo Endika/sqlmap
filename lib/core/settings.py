@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2014 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -27,7 +27,6 @@ SITE = "http://sqlmap.org"
 ISSUES_PAGE = "https://github.com/sqlmapproject/sqlmap/issues/new"
 GIT_REPOSITORY = "git://github.com/sqlmapproject/sqlmap.git"
 GIT_PAGE = "https://github.com/sqlmapproject/sqlmap"
-ML = "sqlmap-users@lists.sourceforge.net"
 
 # colorful banner
 BANNER = """\033[01;33m         _
@@ -40,6 +39,9 @@ BANNER = """\033[01;33m         _
 # Minimum distance of ratio from kb.matchRatio to result in True
 DIFF_TOLERANCE = 0.05
 CONSTANT_RATIO = 0.9
+
+# Ratio used in heuristic check for WAF/IDS/IPS protected targets
+IDS_WAF_CHECK_RATIO = 0.5
 
 # Lower and upper values for match ratio in case of stable page
 LOWER_RATIO_BOUND = 0.02
@@ -427,7 +429,7 @@ BRUTE_TABLE_EXISTS_TEMPLATE = "EXISTS(SELECT %d FROM %s)"
 BRUTE_COLUMN_EXISTS_TEMPLATE = "EXISTS(SELECT %s FROM %s)"
 
 # Payload used for checking of existence of IDS/WAF (dummier the better)
-IDS_WAF_CHECK_PAYLOAD = "AND 1=1 UNION ALL SELECT 1,2,3,table_name FROM information_schema.tables WHERE 2>1"
+IDS_WAF_CHECK_PAYLOAD = "AND 1=1 UNION ALL SELECT 1,2,3,table_name FROM information_schema.tables WHERE 2>1-- ../../../etc/passwd"
 
 # Vectors used for provoking specific WAF/IDS/IPS behavior(s)
 WAF_ATTACK_VECTORS = (
@@ -441,8 +443,8 @@ WAF_ATTACK_VECTORS = (
 # Used for status representation in dictionary attack phase
 ROTATING_CHARS = ('\\', '|', '|', '/', '-')
 
-# Chunk length (in items) used by BigArray objects (only last chunk and cached one are held in memory)
-BIGARRAY_CHUNK_LENGTH = 4096
+# Approximate chunk length (in bytes) used by BigArray objects (only last chunk and cached one are held in memory)
+BIGARRAY_CHUNK_SIZE = 1024 * 1024
 
 # Prefix used for storing dumped chunks in BigArray objects
 BIGARRAY_TEMP_PREFIX = "sqlmapba-%d-" % os.getpid()
