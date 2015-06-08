@@ -145,10 +145,10 @@ INFERENCE_EQUALS_CHAR = "="
 # Character used for operation "not-equals" in inference
 INFERENCE_NOT_EQUALS_CHAR = "!="
 
-# String used for representation of unknown dbms
+# String used for representation of unknown DBMS
 UNKNOWN_DBMS = "Unknown"
 
-# String used for representation of unknown dbms version
+# String used for representation of unknown DBMS version
 UNKNOWN_DBMS_VERSION = "Unknown"
 
 # Dynamicity mark length used in dynamicity removal engine
@@ -213,6 +213,9 @@ USER_AGENT_ALIASES = ("ua", "useragent", "user-agent")
 REFERER_ALIASES = ("ref", "referer", "referrer")
 HOST_ALIASES = ("host",)
 
+# Names that can't be used to name files on Windows OS
+WINDOWS_RESERVED_NAMES = ("CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9")
+
 # Items displayed in basic help (-h) output
 BASIC_HELP_ITEMS = (
                         "url",
@@ -270,7 +273,7 @@ ERROR_PARSING_REGEXES = (
 META_CHARSET_REGEX = r'(?si)<head>.*<meta[^>]+charset="?(?P<result>[^"> ]+).*</head>'
 
 # Regular expression used for parsing refresh info from meta html headers
-META_REFRESH_REGEX = r'(?si)<head>.*<meta http-equiv="?refresh"?[^>]+content="?[^">]+url=["\']?(?P<result>[^\'">]+).*</head>'
+META_REFRESH_REGEX = r'(?si)<head>(?!.*?<noscript.*?</head).*?<meta http-equiv="?refresh"?[^>]+content="?[^">]+url=["\']?(?P<result>[^\'">]+).*</head>'
 
 # Regular expression used for parsing empty fields in tested form data
 EMPTY_FORM_FIELDS_REGEX = r'(&|\A)(?P<result>[^=]+=(&|\Z))'
@@ -446,9 +449,6 @@ ROTATING_CHARS = ('\\', '|', '|', '/', '-')
 # Approximate chunk length (in bytes) used by BigArray objects (only last chunk and cached one are held in memory)
 BIGARRAY_CHUNK_SIZE = 1024 * 1024
 
-# Prefix used for storing dumped chunks in BigArray objects
-BIGARRAY_TEMP_PREFIX = "sqlmapba-%d-" % os.getpid()
-
 # Only console display last n table rows
 TRIM_STDOUT_DUMP_SIZE = 256
 
@@ -483,7 +483,7 @@ DEFAULT_COOKIE_DELIMITER = ';'
 FORCE_COOKIE_EXPIRATION_TIME = "9999999999"
 
 # Github OAuth token used for creating an automatic Issue for unhandled exceptions
-GITHUB_REPORT_OAUTH_TOKEN = "d6c0c7bf3f2298a7b85f82176c46d2f8d494fcc5"
+GITHUB_REPORT_OAUTH_TOKEN = "f05e68171afd41a445b1fff80f369fae88b37968"
 
 # Skip unforced HashDB flush requests below the threshold number of cached items
 HASHDB_FLUSH_THRESHOLD = 32
@@ -495,7 +495,7 @@ HASHDB_FLUSH_RETRIES = 3
 HASHDB_END_TRANSACTION_RETRIES = 3
 
 # Unique milestone value used for forced deprecation of old HashDB values (e.g. when changing hash/pickle mechanism)
-HASHDB_MILESTONE_VALUE = "nXkbwIURlN"  # rd74b803 "".join(random.sample(string.ascii_letters, 10))
+HASHDB_MILESTONE_VALUE = "JHjrBugdDA"  # "".join(random.sample(string.ascii_letters, 10))
 
 # Warn user of possible delay due to large page dump in full UNION query injections
 LARGE_OUTPUT_THRESHOLD = 1024 ** 2
@@ -610,6 +610,9 @@ MIN_ENCODED_LEN_CHECK = 5
 
 # Timeout in seconds in which Metasploit remote session has to be initialized
 METASPLOIT_SESSION_TIMEOUT = 300
+
+# Suffix used to mark variables having keyword names
+EVALCODE_KEYWORD_SUFFIX = "_KEYWORD"
 
 # Reference: http://www.cookiecentral.com/faq/#3.5
 NETSCAPE_FORMAT_HEADER_COOKIES = "# Netscape HTTP Cookie File."

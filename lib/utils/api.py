@@ -29,8 +29,10 @@ from lib.core.datatype import AttribDict
 from lib.core.defaults import _defaults
 from lib.core.enums import CONTENT_STATUS
 from lib.core.enums import PART_RUN_CONTENT_TYPES
+from lib.core.exception import SqlmapConnectionException
 from lib.core.log import LOGGER_HANDLER
 from lib.core.optiondict import optDict
+from lib.core.settings import IS_WIN
 from lib.core.subprocessng import Popen
 from thirdparty.bottle.bottle import error as return_error
 from thirdparty.bottle.bottle import get
@@ -66,17 +68,27 @@ class Database(object):
         logger.debug("REST-JSON API %s connected to IPC database" % who)
 
     def disconnect(self):
-        self.cursor.close()
-        self.connection.close()
+        if self.cursor:
+            self.cursor.close()
+
+        if self.connection:
+            self.connection.close()
 
     def commit(self):
         self.connection.commit()
 
     def execute(self, statement, arguments=None):
-        if arguments:
-            self.cursor.execute(statement, arguments)
-        else:
-            self.cursor.execute(statement)
+        while True:
+            try:
+                if arguments:
+                    self.cursor.execute(statement, arguments)
+                else:
+                    self.cursor.execute(statement)
+            except sqlite3.OperationalError, ex:
+                if not "locked" in ex.message:
+                    raise
+            else:
+                break
 
         if statement.lstrip().upper().startswith("SELECT"):
             return self.cursor.fetchall()
@@ -144,7 +156,7 @@ class Task(object):
 
     def engine_start(self):
         self.process = Popen(["python", "sqlmap.py", "--pickled-options", base64pickle(self.options)],
-                             shell=False, stdin=PIPE, close_fds=False)
+                             shell=False, stdin=PIPE, close_fds=not IS_WIN)
 
     def engine_stop(self):
         if self.process:
@@ -252,8 +264,11 @@ class LogRecorder(logging.StreamHandler):
 
 def setRestAPILog():
     if hasattr(conf, "api"):
-        conf.database_cursor = Database(conf.database)
-        conf.database_cursor.connect("client")
+        try:
+            conf.database_cursor = Database(conf.database)
+            conf.database_cursor.connect("client")
+        except sqlite3.OperationalError, ex:
+            raise SqlmapConnectionException, "%s ('%s')" % (ex, conf.database)
 
         # Set a logging handler that writes log messages to a IPC database
         logger.removeHandler(LOGGER_HANDLER)

@@ -17,7 +17,6 @@ import tempfile
 
 from lib.core.exception import SqlmapSystemException
 from lib.core.settings import BIGARRAY_CHUNK_SIZE
-from lib.core.settings import BIGARRAY_TEMP_PREFIX
 
 DEFAULT_SIZE_OF = sys.getsizeof(object())
 
@@ -92,15 +91,18 @@ class BigArray(list):
 
     def _dump(self, chunk):
         try:
-            handle, filename = tempfile.mkstemp(prefix=BIGARRAY_TEMP_PREFIX)
+            handle, filename = tempfile.mkstemp()
             self.filenames.add(filename)
             os.close(handle)
             with open(filename, "w+b") as fp:
                 pickle.dump(chunk, fp, pickle.HIGHEST_PROTOCOL)
             return filename
-        except IOError, ex:
+        except (OSError, IOError), ex:
             errMsg = "exception occurred while storing data "
-            errMsg += "to a temporary file ('%s')" % ex
+            errMsg += "to a temporary file ('%s'). Please " % ex
+            errMsg += "make sure that there is enough disk space left. If problem persists, "
+            errMsg += "try to set environment variable 'TEMP' to a location "
+            errMsg += "writeable by the current user"
             raise SqlmapSystemException, errMsg
 
     def _checkcache(self, index):
