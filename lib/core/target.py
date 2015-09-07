@@ -80,7 +80,6 @@ def _setRequestParams():
         return
 
     testableParameters = False
-    skipHeaders = False
 
     # Perform checks on GET parameters
     if conf.parameters.get(PLACE.GET):
@@ -93,8 +92,8 @@ def _setRequestParams():
 
     # Perform checks on POST parameters
     if conf.method == HTTPMETHOD.POST and conf.data is None:
-        errMsg = "HTTP POST method depends on HTTP data value to be posted"
-        raise SqlmapSyntaxException(errMsg)
+        logger.warn("detected empty POST body")
+        conf.data = ""
 
     if conf.data is not None:
         conf.method = HTTPMETHOD.POST if not conf.method or conf.method == HTTPMETHOD.GET else conf.method
@@ -125,16 +124,7 @@ def _setRequestParams():
                 kb.processUserMarks = not test or test[0] not in ("n", "N")
 
                 if kb.processUserMarks:
-                    skipHeaders = True
-
-                    conf.parameters.clear()
-                    conf.paramDict.clear()
-
-                    if "=%s" % CUSTOM_INJECTION_MARK_CHAR in conf.data:
-                        warnMsg = "it seems that you've provided empty parameter value(s) "
-                        warnMsg += "for testing. Please, always use only valid parameter values "
-                        warnMsg += "so sqlmap could be able to run properly"
-                        logger.warn(warnMsg)
+                    kb.testOnlyCustom = True
 
         if not (kb.processUserMarks and CUSTOM_INJECTION_MARK_CHAR in conf.data):
             if re.search(JSON_RECOGNITION_REGEX, conf.data):
@@ -144,6 +134,7 @@ def _setRequestParams():
                 if test and test[0] in ("q", "Q"):
                     raise SqlmapUserQuitException
                 elif test[0] not in ("n", "N"):
+                    conf.data = getattr(conf.data, UNENCODED_ORIGINAL_VALUE, conf.data)
                     conf.data = conf.data.replace(CUSTOM_INJECTION_MARK_CHAR, ASTERISK_MARKER)
                     conf.data = re.sub(r'("(?P<name>[^"]+)"\s*:\s*"[^"]+)"', functools.partial(process, repl=r'\g<1>%s"' % CUSTOM_INJECTION_MARK_CHAR), conf.data)
                     conf.data = re.sub(r'("(?P<name>[^"]+)"\s*:\s*)(-?\d[\d\.]*\b)', functools.partial(process, repl=r'\g<0>%s' % CUSTOM_INJECTION_MARK_CHAR), conf.data)
@@ -162,6 +153,7 @@ def _setRequestParams():
                 if test and test[0] in ("q", "Q"):
                     raise SqlmapUserQuitException
                 elif test[0] not in ("n", "N"):
+                    conf.data = getattr(conf.data, UNENCODED_ORIGINAL_VALUE, conf.data)
                     conf.data = conf.data.replace(CUSTOM_INJECTION_MARK_CHAR, ASTERISK_MARKER)
                     conf.data = re.sub(r"('(?P<name>[^']+)'\s*:\s*'[^']+)'", functools.partial(process, repl=r"\g<1>%s'" % CUSTOM_INJECTION_MARK_CHAR), conf.data)
                     conf.data = re.sub(r"('(?P<name>[^']+)'\s*:\s*)(-?\d[\d\.]*\b)", functools.partial(process, repl=r"\g<0>%s" % CUSTOM_INJECTION_MARK_CHAR), conf.data)
@@ -185,6 +177,7 @@ def _setRequestParams():
                 if test and test[0] in ("q", "Q"):
                     raise SqlmapUserQuitException
                 elif test[0] not in ("n", "N"):
+                    conf.data = getattr(conf.data, UNENCODED_ORIGINAL_VALUE, conf.data)
                     conf.data = conf.data.replace(CUSTOM_INJECTION_MARK_CHAR, ASTERISK_MARKER)
                     conf.data = re.sub(r"(<(?P<name>[^>]+)( [^<]*)?>)([^<]+)(</\2)", functools.partial(process, repl=r"\g<1>\g<4>%s\g<5>" % CUSTOM_INJECTION_MARK_CHAR), conf.data)
                     kb.postHint = POST_HINT.SOAP if "soap" in conf.data.lower() else POST_HINT.XML
@@ -196,6 +189,7 @@ def _setRequestParams():
                 if test and test[0] in ("q", "Q"):
                     raise SqlmapUserQuitException
                 elif test[0] not in ("n", "N"):
+                    conf.data = getattr(conf.data, UNENCODED_ORIGINAL_VALUE, conf.data)
                     conf.data = conf.data.replace(CUSTOM_INJECTION_MARK_CHAR, ASTERISK_MARKER)
                     conf.data = re.sub(r"(?si)((Content-Disposition[^\n]+?name\s*=\s*[\"'](?P<name>[^\n]+?)[\"']).+?)(((\r)?\n)+--)", functools.partial(process, repl=r"\g<1>%s\g<4>" % CUSTOM_INJECTION_MARK_CHAR), conf.data)
                     kb.postHint = POST_HINT.MULTIPART
@@ -229,11 +223,11 @@ def _setRequestParams():
         message += "in the target URL itself? [Y/n/q] "
         test = readInput(message, default="Y")
 
-        if not test or test[0] not in ("n", "N"):
+        if test and test[0] in ("q", "Q"):
+            raise SqlmapUserQuitException
+        elif not test or test[0] not in ("n", "N"):
             conf.url = "%s%s" % (conf.url, CUSTOM_INJECTION_MARK_CHAR)
             kb.processUserMarks = True
-        elif test[0] in ("q", "Q"):
-            raise SqlmapUserQuitException
 
     for place, value in ((PLACE.URI, conf.url), (PLACE.CUSTOM_POST, conf.data), (PLACE.CUSTOM_HEADER, str(conf.httpHeaders))):
         _ = re.sub(PROBLEMATIC_CUSTOM_INJECTION_PATTERNS, "", value or "") if place == PLACE.CUSTOM_HEADER else value or ""
@@ -249,10 +243,7 @@ def _setRequestParams():
                     kb.processUserMarks = not test or test[0] not in ("n", "N")
 
                     if kb.processUserMarks:
-                        skipHeaders = True
-
-                        conf.parameters.clear()
-                        conf.paramDict.clear()
+                        kb.testOnlyCustom = True
 
                         if "=%s" % CUSTOM_INJECTION_MARK_CHAR in _:
                             warnMsg = "it seems that you've provided empty parameter value(s) "
@@ -317,50 +308,49 @@ def _setRequestParams():
             if conf.get(item):
                 conf[item] = conf[item].replace(CUSTOM_INJECTION_MARK_CHAR, "")
 
-    if not skipHeaders:
-        # Perform checks on Cookie parameters
-        if conf.cookie:
-            conf.parameters[PLACE.COOKIE] = conf.cookie
-            paramDict = paramToDict(PLACE.COOKIE, conf.cookie)
+    # Perform checks on Cookie parameters
+    if conf.cookie:
+        conf.parameters[PLACE.COOKIE] = conf.cookie
+        paramDict = paramToDict(PLACE.COOKIE, conf.cookie)
 
-            if paramDict:
-                conf.paramDict[PLACE.COOKIE] = paramDict
-                testableParameters = True
+        if paramDict:
+            conf.paramDict[PLACE.COOKIE] = paramDict
+            testableParameters = True
 
-        # Perform checks on header values
-        if conf.httpHeaders:
-            for httpHeader, headerValue in conf.httpHeaders:
-                # Url encoding of the header values should be avoided
-                # Reference: http://stackoverflow.com/questions/5085904/is-ok-to-urlencode-the-value-in-headerlocation-value
+    # Perform checks on header values
+    if conf.httpHeaders:
+        for httpHeader, headerValue in conf.httpHeaders:
+            # Url encoding of the header values should be avoided
+            # Reference: http://stackoverflow.com/questions/5085904/is-ok-to-urlencode-the-value-in-headerlocation-value
 
-                httpHeader = httpHeader.title()
+            httpHeader = httpHeader.title()
 
-                if httpHeader == HTTP_HEADER.USER_AGENT:
-                    conf.parameters[PLACE.USER_AGENT] = urldecode(headerValue)
+            if httpHeader == HTTP_HEADER.USER_AGENT:
+                conf.parameters[PLACE.USER_AGENT] = urldecode(headerValue)
 
-                    condition = any((not conf.testParameter, intersect(conf.testParameter, USER_AGENT_ALIASES)))
+                condition = any((not conf.testParameter, intersect(conf.testParameter, USER_AGENT_ALIASES)))
 
-                    if condition:
-                        conf.paramDict[PLACE.USER_AGENT] = {PLACE.USER_AGENT: headerValue}
-                        testableParameters = True
+                if condition:
+                    conf.paramDict[PLACE.USER_AGENT] = {PLACE.USER_AGENT: headerValue}
+                    testableParameters = True
 
-                elif httpHeader == HTTP_HEADER.REFERER:
-                    conf.parameters[PLACE.REFERER] = urldecode(headerValue)
+            elif httpHeader == HTTP_HEADER.REFERER:
+                conf.parameters[PLACE.REFERER] = urldecode(headerValue)
 
-                    condition = any((not conf.testParameter, intersect(conf.testParameter, REFERER_ALIASES)))
+                condition = any((not conf.testParameter, intersect(conf.testParameter, REFERER_ALIASES)))
 
-                    if condition:
-                        conf.paramDict[PLACE.REFERER] = {PLACE.REFERER: headerValue}
-                        testableParameters = True
+                if condition:
+                    conf.paramDict[PLACE.REFERER] = {PLACE.REFERER: headerValue}
+                    testableParameters = True
 
-                elif httpHeader == HTTP_HEADER.HOST:
-                    conf.parameters[PLACE.HOST] = urldecode(headerValue)
+            elif httpHeader == HTTP_HEADER.HOST:
+                conf.parameters[PLACE.HOST] = urldecode(headerValue)
 
-                    condition = any((not conf.testParameter, intersect(conf.testParameter, HOST_ALIASES)))
+                condition = any((not conf.testParameter, intersect(conf.testParameter, HOST_ALIASES)))
 
-                    if condition:
-                        conf.paramDict[PLACE.HOST] = {PLACE.HOST: headerValue}
-                        testableParameters = True
+                if condition:
+                    conf.paramDict[PLACE.HOST] = {PLACE.HOST: headerValue}
+                    testableParameters = True
 
     if not conf.parameters:
         errMsg = "you did not provide any GET, POST and Cookie "
@@ -413,11 +403,17 @@ def _resumeHashDBValues():
     """
 
     kb.absFilePaths = hashDBRetrieve(HASHDB_KEYS.KB_ABS_FILE_PATHS, True) or kb.absFilePaths
-    kb.chars = hashDBRetrieve(HASHDB_KEYS.KB_CHARS, True) or kb.chars
-    kb.dynamicMarkings = hashDBRetrieve(HASHDB_KEYS.KB_DYNAMIC_MARKINGS, True) or kb.dynamicMarkings
     kb.brute.tables = hashDBRetrieve(HASHDB_KEYS.KB_BRUTE_TABLES, True) or kb.brute.tables
     kb.brute.columns = hashDBRetrieve(HASHDB_KEYS.KB_BRUTE_COLUMNS, True) or kb.brute.columns
+    kb.chars = hashDBRetrieve(HASHDB_KEYS.KB_CHARS, True) or kb.chars
+    kb.dynamicMarkings = hashDBRetrieve(HASHDB_KEYS.KB_DYNAMIC_MARKINGS, True) or kb.dynamicMarkings
     kb.xpCmdshellAvailable = hashDBRetrieve(HASHDB_KEYS.KB_XP_CMDSHELL_AVAILABLE) or kb.xpCmdshellAvailable
+
+    kb.errorChunkLength = hashDBRetrieve(HASHDB_KEYS.KB_ERROR_CHUNK_LENGTH)
+    if kb.errorChunkLength and kb.errorChunkLength.isdigit():
+        kb.errorChunkLength = int(kb.errorChunkLength)
+    else:
+        kb.errorChunkLength = None
 
     conf.tmpPath = conf.tmpPath or hashDBRetrieve(HASHDB_KEYS.CONF_TMP_PATH)
 
@@ -618,7 +614,7 @@ def _createTargetDirs():
 
             warnMsg = "unable to create regular output directory "
             warnMsg += "'%s' (%s). " % (paths.SQLMAP_OUTPUT_PATH, getUnicode(ex))
-            warnMsg += "Using temporary directory '%s' instead" % tempDir
+            warnMsg += "Using temporary directory '%s' instead" % getUnicode(tempDir)
             logger.warn(warnMsg)
 
             paths.SQLMAP_OUTPUT_PATH = tempDir
@@ -640,7 +636,7 @@ def _createTargetDirs():
 
             warnMsg = "unable to create output directory "
             warnMsg += "'%s' (%s). " % (conf.outputPath, getUnicode(ex))
-            warnMsg += "Using temporary directory '%s' instead" % tempDir
+            warnMsg += "Using temporary directory '%s' instead" % getUnicode(tempDir)
             logger.warn(warnMsg)
 
             conf.outputPath = tempDir
@@ -697,10 +693,13 @@ def initTargetEnv():
         class _(unicode):
             pass
 
+        kb.postUrlEncode = True
+
         for key, value in conf.httpHeaders:
             if key.upper() == HTTP_HEADER.CONTENT_TYPE.upper():
                 kb.postUrlEncode = "urlencoded" in value
                 break
+
         if kb.postUrlEncode:
             original = conf.data
             conf.data = _(urldecode(conf.data))
