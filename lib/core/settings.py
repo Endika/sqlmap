@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -11,7 +11,9 @@ import subprocess
 import string
 import sys
 import time
+import types
 
+from lib.core.datatype import AttribDict
 from lib.core.enums import DBMS
 from lib.core.enums import DBMS_DIRECTORY_NAME
 from lib.core.enums import OS
@@ -20,7 +22,7 @@ from lib.core.revision import getRevisionNumber
 # sqlmap version and site
 VERSION = "1.0-dev"
 REVISION = getRevisionNumber()
-VERSION_STRING = "sqlmap/%s%s" % (VERSION, "-%s" % REVISION if REVISION else "-nongit-%s" % time.strftime("%Y%m%d", time.gmtime(os.path.getctime(__file__))))
+VERSION_STRING = "sqlmap/%s%s" % (VERSION, "-%s" % REVISION if REVISION else "-nongit-%s-%04x" % (time.strftime("%Y%m%d", time.gmtime(os.path.getmtime(__file__))), os.path.getsize(os.path.join(os.path.dirname(__file__), "common.py")) & 0xffff))
 DESCRIPTION = "automatic SQL injection and database takeover tool"
 SITE = "http://sqlmap.org"
 ISSUES_PAGE = "https://github.com/sqlmapproject/sqlmap/issues/new"
@@ -42,6 +44,9 @@ CONSTANT_RATIO = 0.9
 # Ratio used in heuristic check for WAF/IDS/IPS protected targets
 IDS_WAF_CHECK_RATIO = 0.5
 
+# Timeout used in heuristic check for WAF/IDS/IPS protected targets
+IDS_WAF_CHECK_TIMEOUT = 10
+
 # Lower and upper values for match ratio in case of stable page
 LOWER_RATIO_BOUND = 0.02
 UPPER_RATIO_BOUND = 0.98
@@ -55,6 +60,9 @@ PARTIAL_HEX_VALUE_MARKER = "__PARTIAL_HEX_VALUE__"
 URI_QUESTION_MARKER = "__QUESTION_MARK__"
 ASTERISK_MARKER = "__ASTERISK_MARK__"
 REPLACEMENT_MARKER = "__REPLACEMENT_MARK__"
+
+RANDOM_INTEGER_MARKER = "[RANDINT]"
+RANDOM_STRING_MARKER = "[RANDSTR]"
 
 PAYLOAD_DELIMITER = "__PAYLOAD_DELIMITER__"
 CHAR_INFERENCE_MARK = "%c"
@@ -70,7 +78,7 @@ PERMISSION_DENIED_REGEX = r"(command|permission|access)\s*(was|is)?\s*denied"
 MAX_CONNECTIONS_REGEX = r"max.+connections"
 
 # Regular expression used for extracting results from Google search
-GOOGLE_REGEX = r"url\?\w+=((?![^>]+webcache\.googleusercontent\.com)http[^>]+)&(sa=U|rct=j)"
+GOOGLE_REGEX = r"webcache\.googleusercontent\.com/search\?q=cache:[^:]+:([^+]+)\+&amp;cd=|url\?\w+=((?![^>]+webcache\.googleusercontent\.com)http[^>]+)&(sa=U|rct=j)"
 
 # Regular expression used for extracting results from DuckDuckGo search
 DUCKDUCKGO_REGEX = r'"u":"([^"]+)'
@@ -218,6 +226,8 @@ DBMS_ALIASES = ((DBMS.MSSQL, MSSQL_ALIASES), (DBMS.MYSQL, MYSQL_ALIASES), (DBMS.
 USER_AGENT_ALIASES = ("ua", "useragent", "user-agent")
 REFERER_ALIASES = ("ref", "referer", "referrer")
 HOST_ALIASES = ("host",)
+
+HSQLDB_DEFAULT_SCHEMA = "PUBLIC"
 
 # Names that can't be used to name files on Windows OS
 WINDOWS_RESERVED_NAMES = ("CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9")
@@ -422,6 +432,8 @@ HTML_TITLE_REGEX = "<title>(?P<result>[^<]+)</title>"
 # Table used for Base64 conversion in WordPress hash cracking routine
 ITOA64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
+PICKLE_REDUCE_WHITELIST = (types.BooleanType, types.DictType, types.FloatType, types.IntType, types.ListType, types.LongType, types.NoneType, types.StringType, types.TupleType, types.UnicodeType, types.XRangeType, type(AttribDict()), type(set()))
+
 # Chars used to quickly distinguish if the user provided tainted parameter values
 DUMMY_SQL_INJECTION_CHARS = ";()'"
 
@@ -461,6 +473,9 @@ ROTATING_CHARS = ('\\', '|', '|', '/', '-')
 # Approximate chunk length (in bytes) used by BigArray objects (only last chunk and cached one are held in memory)
 BIGARRAY_CHUNK_SIZE = 1024 * 1024
 
+# Maximum number of socket pre-connects
+SOCKET_PRE_CONNECT_QUEUE_SIZE = 3
+
 # Only console display last n table rows
 TRIM_STDOUT_DUMP_SIZE = 256
 
@@ -495,7 +510,7 @@ DEFAULT_COOKIE_DELIMITER = ';'
 FORCE_COOKIE_EXPIRATION_TIME = "9999999999"
 
 # Github OAuth token used for creating an automatic Issue for unhandled exceptions
-GITHUB_REPORT_OAUTH_TOKEN = "YzQzM2M2YzgzMDExN2I5ZDMyYjAzNTIzODIwZDA2MDFmMmVjODI1Ng=="
+GITHUB_REPORT_OAUTH_TOKEN = "YzNkYTgyMTdjYzdjNjZjMjFjMWE5ODI5OGQyNzk2ODM1M2M0MzUyOA=="
 
 # Skip unforced HashDB flush requests below the threshold number of cached items
 HASHDB_FLUSH_THRESHOLD = 32
@@ -533,8 +548,11 @@ DNS_BOUNDARIES_ALPHABET = re.sub("[a-fA-F]", "", string.ascii_letters)
 # Alphabet used for heuristic checks
 HEURISTIC_CHECK_ALPHABET = ('"', '\'', ')', '(', ',', '.')
 
-# String used for dummy XSS check of a tested parameter value
-DUMMY_XSS_CHECK_APPENDIX = "<'\">"
+# String used for dummy non-SQLi (e.g. XSS) heuristic checks of a tested parameter value
+DUMMY_NON_SQLI_CHECK_APPENDIX = "<'\">"
+
+# Length of prefix and suffix used in non-SQLI heuristic checks
+NON_SQLI_CHECK_PREFIX_SUFFIX_LENGTH = 6
 
 # Connection chunk size (processing large responses in chunks to avoid MemoryError crashes - e.g. large table dump in full UNION injections)
 MAX_CONNECTION_CHUNK_SIZE = 10 * 1024 * 1024
@@ -549,7 +567,7 @@ MAX_BISECTION_LENGTH = 50 * 1024 * 1024
 LARGE_CHUNK_TRIM_MARKER = "__TRIMMED_CONTENT__"
 
 # Generic SQL comment formation
-GENERIC_SQL_COMMENT = "-- "
+GENERIC_SQL_COMMENT = "-- -"
 
 # Threshold value for turning back on time auto-adjustment mechanism
 VALID_TIME_CHARS_RUN_THRESHOLD = 100
@@ -558,7 +576,7 @@ VALID_TIME_CHARS_RUN_THRESHOLD = 100
 CHECK_ZERO_COLUMNS_THRESHOLD = 10
 
 # Boldify all logger messages containing these "patterns"
-BOLD_PATTERNS = ("' injectable", "might be injectable", "' is vulnerable", "is not injectable", "test failed", "test passed", "live test final result", "test shows that", "the back-end DBMS is", "created Github", "blocked by the target server", "protection is involved")
+BOLD_PATTERNS = ("' injectable", "provided empty", "leftover chars", "might be injectable", "' is vulnerable", "is not injectable", "test failed", "test passed", "live test final result", "test shows that", "the back-end DBMS is", "created Github", "blocked by the target server", "protection is involved")
 
 # Generic www root directory names
 GENERIC_DOC_ROOT_DIRECTORY_NAMES = ("htdocs", "httpdocs", "public", "wwwroot", "www")
@@ -581,8 +599,14 @@ EVENTVALIDATION_REGEX = r'(?i)(?P<name>__EVENTVALIDATION[^"]*)[^>]+value="(?P<re
 # Number of rows to generate inside the full union test for limited output (mustn't be too large to prevent payload length problems)
 LIMITED_ROWS_TEST_NUMBER = 15
 
+# Default REST-JSON API server listen address
+RESTAPI_DEFAULT_ADDRESS = "127.0.0.1"
+
+# Default REST-JSON API server listen port
+RESTAPI_DEFAULT_PORT = 8775
+
 # Format used for representing invalid unicode characters
-INVALID_UNICODE_CHAR_FORMAT = r"\?%02x"
+INVALID_UNICODE_CHAR_FORMAT = r"\x%02x"
 
 # Regular expression for XML POST data
 XML_RECOGNITION_REGEX = r"(?s)\A\s*<[^>]+>(.+>)?\s*\Z"

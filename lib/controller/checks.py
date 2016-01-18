@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -22,8 +22,11 @@ from lib.core.common import findDynamicContent
 from lib.core.common import Format
 from lib.core.common import getLastRequestHTTPError
 from lib.core.common import getPublicTypeMembers
+from lib.core.common import getSafeExString
 from lib.core.common import getSortedInjectionTests
 from lib.core.common import getUnicode
+from lib.core.common import hashDBRetrieve
+from lib.core.common import hashDBWrite
 from lib.core.common import intersect
 from lib.core.common import listToStrValue
 from lib.core.common import parseFilePaths
@@ -38,6 +41,7 @@ from lib.core.common import singleTimeWarnMessage
 from lib.core.common import urlencode
 from lib.core.common import wasLastResponseDBMSError
 from lib.core.common import wasLastResponseHTTPError
+from lib.core.defaults import defaults
 from lib.core.data import conf
 from lib.core.data import kb
 from lib.core.data import logger
@@ -46,6 +50,7 @@ from lib.core.datatype import InjectionDict
 from lib.core.decorators import cachedmethod
 from lib.core.dicts import FROM_DUMMY_TABLE
 from lib.core.enums import DBMS
+from lib.core.enums import HASHDB_KEYS
 from lib.core.enums import HEURISTIC_TEST
 from lib.core.enums import HTTP_HEADER
 from lib.core.enums import HTTPMETHOD
@@ -58,15 +63,17 @@ from lib.core.exception import SqlmapNoneDataException
 from lib.core.exception import SqlmapSilentQuitException
 from lib.core.exception import SqlmapUserQuitException
 from lib.core.settings import DEFAULT_GET_POST_DELIMITER
-from lib.core.settings import DUMMY_XSS_CHECK_APPENDIX
+from lib.core.settings import DUMMY_NON_SQLI_CHECK_APPENDIX
 from lib.core.settings import FORMAT_EXCEPTION_STRINGS
 from lib.core.settings import HEURISTIC_CHECK_ALPHABET
+from lib.core.settings import IDS_WAF_CHECK_PAYLOAD
+from lib.core.settings import IDS_WAF_CHECK_RATIO
+from lib.core.settings import IDS_WAF_CHECK_TIMEOUT
+from lib.core.settings import NON_SQLI_CHECK_PREFIX_SUFFIX_LENGTH
 from lib.core.settings import SUHOSIN_MAX_VALUE_LENGTH
 from lib.core.settings import SUPPORTED_DBMS
 from lib.core.settings import URI_HTTP_HEADER
 from lib.core.settings import UPPER_RATIO_BOUND
-from lib.core.settings import IDS_WAF_CHECK_PAYLOAD
-from lib.core.settings import IDS_WAF_CHECK_RATIO
 from lib.core.threads import getCurrentThreadData
 from lib.request.connect import Connect as Request
 from lib.request.inject import checkBooleanExpression
@@ -102,7 +109,7 @@ def checkSqlInjection(place, parameter, value):
                 # then attempt to identify with a simple DBMS specific boolean-based
                 # test what the DBMS may be
                 if not injection.dbms and PAYLOAD.TECHNIQUE.BOOLEAN in injection.data:
-                    if not Backend.getIdentifiedDbms() and kb.heuristicDbms is False:
+                    if not Backend.getIdentifiedDbms() and kb.heuristicDbms is None:
                         kb.heuristicDbms = heuristicCheckDbms(injection)
 
                 # If the DBMS has already been fingerprinted (via DBMS-specific
@@ -201,6 +208,16 @@ def checkSqlInjection(place, parameter, value):
                (test.title, test.vector, payloadDbms)):
                     debugMsg = "skipping test '%s' because its " % title
                     debugMsg += "name/vector/DBMS is not included by the given filter"
+                    logger.debug(debugMsg)
+                    continue
+
+            # Skip tests if title, vector or DBMS is included by the
+            # given skip filter
+            if conf.testSkip and any(conf.testSkip in str(item) or \
+               re.search(conf.testSkip, str(item), re.I) for item in \
+               (test.title, test.vector, payloadDbms)):
+                    debugMsg = "skipping test '%s' because its " % title
+                    debugMsg += "name/vector/DBMS is included by the given skip filter"
                     logger.debug(debugMsg)
                     continue
 
@@ -430,10 +447,19 @@ def checkSqlInjection(place, parameter, value):
                             truePage = threadData.lastComparisonPage or ""
 
                             if trueResult and not(truePage == falsePage and not kb.nullConnection):
+                                # Perform the test's False request
                                 falseResult = Request.queryPage(genCmpPayload(), place, raise404=False)
 
-                                # Perform the test's False request
                                 if not falseResult:
+                                    if kb.negativeLogic:
+                                        boundPayload = agent.prefixQuery(kb.data.randomStr, prefix, where, clause)
+                                        boundPayload = agent.suffixQuery(boundPayload, comment, suffix, where)
+                                        errorPayload = agent.payload(place, parameter, newValue=boundPayload, where=where)
+
+                                        errorResult = Request.queryPage(errorPayload, place, raise404=False)
+                                        if errorResult:
+                                            continue
+
                                     infoMsg = "%s parameter '%s' seems to be '%s' injectable " % (paramType, parameter, title)
                                     logger.info(infoMsg)
 
@@ -695,11 +721,11 @@ def heuristicCheckDbms(injection):
     kb.injection = injection
 
     for dbms in getPublicTypeMembers(DBMS, True):
-        if not FROM_DUMMY_TABLE.get(dbms, ""):
-            continue
-
         randStr1, randStr2 = randomStr(), randomStr()
         Backend.forceDbms(dbms)
+
+        if conf.noEscape and dbms not in FROM_DUMMY_TABLE:
+            continue
 
         if checkBooleanExpression("(SELECT '%s'%s)='%s'" % (randStr1, FROM_DUMMY_TABLE.get(dbms, ""), randStr1)):
             if not checkBooleanExpression("(SELECT '%s'%s)='%s'" % (randStr1, FROM_DUMMY_TABLE.get(dbms, ""), randStr2)):
@@ -763,6 +789,10 @@ def checkFalsePositives(injection):
                 break
 
             elif not checkBooleanExpression("%d=%d" % (randInt2, randInt2)):
+                retVal = None
+                break
+
+            elif checkBooleanExpression("%d %d" % (randInt3, randInt2)):
                 retVal = None
                 break
 
@@ -903,17 +933,25 @@ def heuristicCheckSqlInjection(place, parameter):
 
     kb.heuristicMode = True
 
-    value = "%s%s%s" % (randomStr(), DUMMY_XSS_CHECK_APPENDIX, randomStr())
+    randStr1, randStr2 = randomStr(NON_SQLI_CHECK_PREFIX_SUFFIX_LENGTH), randomStr(NON_SQLI_CHECK_PREFIX_SUFFIX_LENGTH)
+    value = "%s%s%s" % (randStr1, DUMMY_NON_SQLI_CHECK_APPENDIX, randStr2)
     payload = "%s%s%s" % (prefix, "'%s" % value, suffix)
     payload = agent.payload(place, parameter, newValue=payload)
     page, _ = Request.queryPage(payload, place, content=True, raise404=False)
 
     paramType = conf.method if conf.method not in (None, HTTPMETHOD.GET, HTTPMETHOD.POST) else place
 
-    if value in (page or ""):
+    if value.lower() in (page or "").lower():
         infoMsg = "heuristic (XSS) test shows that %s parameter " % paramType
-        infoMsg += "'%s' might be vulnerable to XSS attacks" % parameter
+        infoMsg += "'%s' might be vulnerable to cross-site scripting attacks" % parameter
         logger.info(infoMsg)
+
+    for match in re.finditer("(?i)[^\n]*(no such file|failed (to )?open)[^\n]*", page or ""):
+        if randStr1.lower() in match.group(0).lower():
+            infoMsg = "heuristic (FI) test shows that %s parameter " % paramType
+            infoMsg += "'%s' might be vulnerable to file inclusion attacks" % parameter
+            logger.info(infoMsg)
+            break
 
     kb.heuristicMode = False
 
@@ -1021,7 +1059,7 @@ def checkStability():
     delay = max(0, min(1, delay))
     time.sleep(delay)
 
-    secondPage, _ = Request.queryPage(content=True, raise404=False)
+    secondPage, _ = Request.queryPage(content=True, noteResponseTime=False, raise404=False)
 
     if kb.redirectChoice:
         return None
@@ -1139,12 +1177,20 @@ def checkWaf():
     Reference: http://seclists.org/nmap-dev/2011/q2/att-1005/http-waf-detect.nse
     """
 
-    if any((conf.string, conf.notString, conf.regexp, conf.dummy, conf.offline)):
+    if any((conf.string, conf.notString, conf.regexp, conf.dummy, conf.offline, conf.skipWaf)):
         return None
 
-    dbmMsg = "heuristically checking if the target is protected by "
-    dbmMsg += "some kind of WAF/IPS/IDS"
-    logger.debug(dbmMsg)
+    _ = hashDBRetrieve(HASHDB_KEYS.CHECK_WAF_RESULT, True)
+    if _ is not None:
+        if _:
+            warnMsg = "previous heuristics detected that the target "
+            warnMsg += "is protected by some kind of WAF/IPS/IDS"
+            logger.critical(warnMsg)
+        return _
+
+    infoMsg = "checking if the target is protected by "
+    infoMsg += "some kind of WAF/IPS/IDS"
+    logger.info(infoMsg)
 
     retVal = False
     payload = "%d %s" % (randomInt(), IDS_WAF_CHECK_PAYLOAD)
@@ -1152,12 +1198,16 @@ def checkWaf():
     value = "" if not conf.parameters.get(PLACE.GET) else conf.parameters[PLACE.GET] + DEFAULT_GET_POST_DELIMITER
     value += agent.addPayloadDelimiters("%s=%s" % (randomStr(), payload))
 
+    pushValue(conf.timeout)
+    conf.timeout = IDS_WAF_CHECK_TIMEOUT
+
     try:
         retVal = Request.queryPage(place=PLACE.GET, value=value, getRatioValue=True, noteResponseTime=False, silent=True)[1] < IDS_WAF_CHECK_RATIO
     except SqlmapConnectionException:
         retVal = True
     finally:
         kb.matchRatio = None
+        conf.timeout = popValue()
 
     if retVal:
         warnMsg = "heuristics detected that the target "
@@ -1171,6 +1221,12 @@ def checkWaf():
 
             if output and output[0] in ("Y", "y"):
                 conf.identifyWaf = True
+
+        if conf.timeout == defaults.timeout:
+            logger.warning("dropping timeout to %d seconds (i.e. '--timeout=%d')" % (IDS_WAF_CHECK_TIMEOUT, IDS_WAF_CHECK_TIMEOUT))
+            conf.timeout = IDS_WAF_CHECK_TIMEOUT
+
+    hashDBWrite(HASHDB_KEYS.CHECK_WAF_RESULT, retVal, True)
 
     return retVal
 
@@ -1209,7 +1265,7 @@ def identifyWaf():
             found = function(_)
         except Exception, ex:
             errMsg = "exception occurred while running "
-            errMsg += "WAF script for '%s' ('%s')" % (product, ex)
+            errMsg += "WAF script for '%s' ('%s')" % (product, getSafeExString(ex))
             logger.critical(errMsg)
 
             found = False
@@ -1278,8 +1334,8 @@ def checkNullConnection():
                     infoMsg = "NULL connection is supported with 'skip-read' method"
                     logger.info(infoMsg)
 
-    except SqlmapConnectionException, errMsg:
-        errMsg = getUnicode(errMsg)
+    except SqlmapConnectionException, ex:
+        errMsg = getSafeExString(ex)
         raise SqlmapConnectionException(errMsg)
 
     finally:
@@ -1298,7 +1354,7 @@ def checkConnection(suppressOutput=False):
             raise SqlmapConnectionException(errMsg)
         except socket.error, ex:
             errMsg = "problem occurred while "
-            errMsg += "resolving a host name '%s' ('%s')" % (conf.hostname, ex.message)
+            errMsg += "resolving a host name '%s' ('%s')" % (conf.hostname, getSafeExString(ex))
             raise SqlmapConnectionException(errMsg)
 
     if not suppressOutput and not conf.dummy and not conf.offline:
@@ -1326,7 +1382,7 @@ def checkConnection(suppressOutput=False):
         else:
             kb.errorIsNone = True
 
-    except SqlmapConnectionException, errMsg:
+    except SqlmapConnectionException, ex:
         if conf.ipv6:
             warnMsg = "check connection to a provided "
             warnMsg += "IPv6 address with a tool like ping6 "
@@ -1336,7 +1392,7 @@ def checkConnection(suppressOutput=False):
             singleTimeWarnMessage(warnMsg)
 
         if any(code in kb.httpErrorCodes for code in (httplib.NOT_FOUND, )):
-            errMsg = getUnicode(errMsg)
+            errMsg = getSafeExString(ex)
             logger.critical(errMsg)
 
             if conf.multipleTargets:

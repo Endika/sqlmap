@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -9,6 +9,7 @@ import os
 
 from xml.etree import ElementTree as et
 
+from lib.core.common import getSafeExString
 from lib.core.data import conf
 from lib.core.data import paths
 from lib.core.datatype import AttribDict
@@ -19,13 +20,13 @@ def cleanupVals(text, tag):
         text = text.split(',')
 
     if isinstance(text, basestring):
-        text = int(text) if text.isdigit() else str(text)
+        text = int(text) if text.isdigit() else text
 
     elif isinstance(text, list):
         count = 0
 
         for _ in text:
-            text[count] = int(_) if _.isdigit() else str(_)
+            text[count] = int(_) if _.isdigit() else _
             count += 1
 
         if len(text) == 1 and tag not in ("clause", "where"):
@@ -74,7 +75,7 @@ def loadBoundaries():
         doc = et.parse(paths.BOUNDARIES_XML)
     except Exception, ex:
         errMsg = "something seems to be wrong with "
-        errMsg += "the file '%s' ('%s'). Please make " % (paths.BOUNDARIES_XML, ex)
+        errMsg += "the file '%s' ('%s'). Please make " % (paths.BOUNDARIES_XML, getSafeExString(ex))
         errMsg += "sure that you haven't made any changes to it"
         raise SqlmapInstallationException, errMsg
 
@@ -92,7 +93,7 @@ def loadPayloads():
             doc = et.parse(payloadFilePath)
         except Exception, ex:
             errMsg = "something seems to be wrong with "
-            errMsg += "the file '%s' ('%s'). Please make " % (payloadFilePath, ex)
+            errMsg += "the file '%s' ('%s'). Please make " % (payloadFilePath, getSafeExString(ex))
             errMsg += "sure that you haven't made any changes to it"
             raise SqlmapInstallationException, errMsg
 

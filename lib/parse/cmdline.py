@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -36,14 +36,17 @@ from lib.core.shell import clearHistory
 from lib.core.shell import loadHistory
 from lib.core.shell import saveHistory
 
-def cmdLineParser():
+def cmdLineParser(argv=None):
     """
     This function parses the command line parameters and arguments
     """
 
+    if not argv:
+        argv = sys.argv
+
     checkSystemEncoding()
 
-    _ = getUnicode(os.path.basename(sys.argv[0]), encoding=sys.getfilesystemencoding())
+    _ = getUnicode(os.path.basename(argv[0]), encoding=sys.getfilesystemencoding())
 
     usage = "%s%s [options]" % ("python " if not IS_WIN else "", \
             "\"%s\"" % _ if " " in _ else _)
@@ -141,8 +144,8 @@ def cmdLineParser():
                            help="HTTP authentication credentials "
                                 "(name:password)")
 
-        request.add_option("--auth-private", dest="authPrivate",
-                           help="HTTP authentication PEM private key file")
+        request.add_option("--auth-file", dest="authFile",
+                           help="HTTP authentication PEM cert/private key file")
 
         request.add_option("--ignore-401", dest="ignore401", action="store_true",
                           help="Ignore HTTP Error 401 (Unauthorized)")
@@ -671,6 +674,9 @@ def cmdLineParser():
         general.add_option("--test-filter", dest="testFilter",
                            help="Select tests by payloads and/or titles (e.g. ROW)")
 
+        general.add_option("--test-skip", dest="testSkip",
+                           help="Skip tests by payloads and/or titles (e.g. BENCHMARK)")
+
         general.add_option("--update", dest="updateAll",
                             action="store_true",
                             help="Update sqlmap")
@@ -710,6 +716,10 @@ def cmdLineParser():
                                   action="store_true",
                                   help="Make a thorough testing for a WAF/IPS/IDS protection")
 
+        miscellaneous.add_option("--skip-waf", dest="skipWaf",
+                                  action="store_true",
+                                  help="Skip heuristic detection of WAF/IPS/IDS protection")
+
         miscellaneous.add_option("--mobile", dest="mobile",
                                   action="store_true",
                                   help="Imitate smartphone through HTTP User-Agent header")
@@ -744,6 +754,9 @@ def cmdLineParser():
         parser.add_option("--pickled-options", dest="pickledOptions",
                           help=SUPPRESS_HELP)
 
+        parser.add_option("--disable-precon", dest="disablePrecon", action="store_true",
+                          help=SUPPRESS_HELP)
+
         parser.add_option("--profile", dest="profile", action="store_true",
                           help=SUPPRESS_HELP)
 
@@ -754,6 +767,9 @@ def cmdLineParser():
                           help=SUPPRESS_HELP)
 
         parser.add_option("--force-dns", dest="forceDns", action="store_true",
+                          help=SUPPRESS_HELP)
+
+        parser.add_option("--force-threads", dest="forceThreads", action="store_true",
                           help=SUPPRESS_HELP)
 
         parser.add_option("--smoke-test", dest="smokeTest", action="store_true",
@@ -785,10 +801,10 @@ def cmdLineParser():
 
         # Dirty hack to display longer options without breaking into two lines
         def _(self, *args):
-            _ = parser.formatter._format_option_strings(*args)
-            if len(_) > MAX_HELP_OPTION_LENGTH:
-                _ = ("%%.%ds.." % (MAX_HELP_OPTION_LENGTH - parser.formatter.indent_increment)) % _
-            return _
+            retVal = parser.formatter._format_option_strings(*args)
+            if len(retVal) > MAX_HELP_OPTION_LENGTH:
+                retVal = ("%%.%ds.." % (MAX_HELP_OPTION_LENGTH - parser.formatter.indent_increment)) % retVal
+            return retVal
 
         parser.formatter._format_option_strings = parser.formatter.format_option_strings
         parser.formatter.format_option_strings = type(parser.formatter.format_option_strings)(_, parser, type(parser))
@@ -802,14 +818,15 @@ def cmdLineParser():
         option = parser.get_option("-h")
         option.help = option.help.capitalize().replace("this help", "basic help")
 
-        argv = []
+        _ = []
         prompt = False
         advancedHelp = True
         extraHeaders = []
 
-        for arg in sys.argv:
-            argv.append(getUnicode(arg, encoding=sys.getfilesystemencoding()))
+        for arg in argv:
+            _.append(getUnicode(arg, encoding=sys.getfilesystemencoding()))
 
+        argv = _
         checkDeprecatedOptions(argv)
 
         prompt = "--sqlmap-shell" in argv

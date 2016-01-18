@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -43,6 +43,7 @@ from lib.core.data import queries
 from lib.core.dicts import FROM_DUMMY_TABLE
 from lib.core.enums import DBMS
 from lib.core.enums import PAYLOAD
+from lib.core.exception import SqlmapDataException
 from lib.core.exception import SqlmapSyntaxException
 from lib.core.settings import MAX_BUFFERED_PARTIAL_UNION_LENGTH
 from lib.core.settings import SQL_SCALAR_REGEX
@@ -55,7 +56,7 @@ from lib.utils.progress import ProgressBar
 from thirdparty.odict.odict import OrderedDict
 
 def _oneShotUnionUse(expression, unpack=True, limited=False):
-    retVal = hashDBRetrieve("%s%s" % (conf.hexConvert, expression), checkConf=True)  # as union data is stored raw unconverted
+    retVal = hashDBRetrieve("%s%s" % (conf.hexConvert or False, expression), checkConf=True)  # as union data is stored raw unconverted
 
     threadData = getCurrentThreadData()
     threadData.resumed = retVal is not None
@@ -101,7 +102,7 @@ def _oneShotUnionUse(expression, unpack=True, limited=False):
             if Backend.isDbms(DBMS.MSSQL) and wasLastResponseDBMSError():
                 retVal = htmlunescape(retVal).replace("<br>", "\n")
 
-            hashDBWrite("%s%s" % (conf.hexConvert, expression), retVal)
+            hashDBWrite("%s%s" % (conf.hexConvert or False, expression), retVal)
         else:
             trimmed = _("%s(?P<result>.*?)<" % (kb.chars.start))
 
@@ -110,6 +111,9 @@ def _oneShotUnionUse(expression, unpack=True, limited=False):
                 warnMsg += "(probably due to its length and/or content): "
                 warnMsg += safecharencode(trimmed)
                 logger.warn(warnMsg)
+    else:
+        vector = kb.injection.data[PAYLOAD.TECHNIQUE.UNION].vector
+        kb.unionDuplicates = vector[7]
 
     return retVal
 
@@ -231,7 +235,14 @@ def unionUse(expression, unpack=True, dump=False):
                 return value
 
             threadData = getCurrentThreadData()
-            threadData.shared.limits = iter(xrange(startLimit, stopLimit))
+
+            try:
+                threadData.shared.limits = iter(xrange(startLimit, stopLimit))
+            except OverflowError:
+                errMsg = "boundary limits (%d,%d) are too large. Please rerun " % (startLimit, stopLimit)
+                errMsg += "with switch '--fresh-queries'"
+                raise SqlmapDataException(errMsg)
+
             numThreads = min(conf.threads, (stopLimit - startLimit))
             threadData.shared.value = BigArray()
             threadData.shared.buffered = []

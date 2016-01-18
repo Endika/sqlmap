@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -18,6 +18,7 @@ from lib.core.common import readInput
 from lib.core.data import conf
 from lib.core.data import logger
 from lib.core.data import paths
+from lib.core.exception import SqlmapDataException
 
 class ICMPsh:
     """
@@ -41,6 +42,9 @@ class ICMPsh:
         while not address:
             address = readInput(message, default=self.remoteIP)
 
+            if conf.batch and not address:
+                raise SqlmapDataException("remote host address is missing")
+
         return address
 
     def _selectLhost(self):
@@ -52,6 +56,9 @@ class ICMPsh:
 
         while not address:
             address = readInput(message, default=self.localIP)
+
+            if conf.batch and not address:
+                raise SqlmapDataException("local host address is missing")
 
         return address
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -44,6 +44,7 @@ from lib.core.common import clearConsoleLine
 from lib.core.common import dataToStdout
 from lib.core.common import getFileItems
 from lib.core.common import getPublicTypeMembers
+from lib.core.common import getSafeExString
 from lib.core.common import hashDBRetrieve
 from lib.core.common import hashDBWrite
 from lib.core.common import normalizeUnicode
@@ -121,6 +122,13 @@ def postgres_passwd(password, username, uppercase=False):
     >>> postgres_passwd(password='testpass', username='testuser', uppercase=False)
     'md599e5ea7a6f7c3269995cba3927fd0093'
     """
+
+
+    if isinstance(username, unicode):
+        username = unicode.encode(username, UNICODE_ENCODING)
+
+    if isinstance(password, unicode):
+        password = unicode.encode(password, UNICODE_ENCODING)
 
     retVal = "md5%s" % md5(password + username).hexdigest()
 
@@ -206,7 +214,10 @@ def oracle_old_passwd(password, username, uppercase=True):  # prior to version '
     IV, pad = "\0" * 8, "\0"
 
     if isinstance(username, unicode):
-        username = unicode.encode(username, UNICODE_ENCODING)  # pyDes has issues with unicode strings
+        username = unicode.encode(username, UNICODE_ENCODING)
+
+    if isinstance(password, unicode):
+        password = unicode.encode(password, UNICODE_ENCODING)
 
     unistr = "".join("\0%s" % c for c in (username + password).upper())
 
@@ -326,8 +337,11 @@ def wordpress_passwd(password, salt, count, prefix, uppercase=False):
 
         return output
 
+    if isinstance(password, unicode):
+        password = password.encode(UNICODE_ENCODING)
+
     cipher = md5(salt)
-    cipher.update(password.encode(UNICODE_ENCODING))
+    cipher.update(password)
     hash_ = cipher.digest()
 
     for i in xrange(count):
@@ -706,14 +720,18 @@ def dictionaryAttack(attack_dict):
                         item = [(user, hash_), {}]
                     elif hash_regex in (HASH.ORACLE_OLD, HASH.POSTGRES):
                         item = [(user, hash_), {'username': user}]
-                    elif hash_regex in (HASH.ORACLE):
+                    elif hash_regex in (HASH.ORACLE,):
                         item = [(user, hash_), {'salt': hash_[-20:]}]
                     elif hash_regex in (HASH.MSSQL, HASH.MSSQL_OLD, HASH.MSSQL_NEW):
                         item = [(user, hash_), {'salt': hash_[6:14]}]
-                    elif hash_regex in (HASH.CRYPT_GENERIC):
+                    elif hash_regex in (HASH.CRYPT_GENERIC,):
                         item = [(user, hash_), {'salt': hash_[0:2]}]
-                    elif hash_regex in (HASH.WORDPRESS):
-                        item = [(user, hash_), {'salt': hash_[4:12], 'count': 1 << ITOA64.index(hash_[3]), 'prefix': hash_[:12]}]
+                    elif hash_regex in (HASH.WORDPRESS,):
+                        if ITOA64.index(hash_[3]) < 32:
+                            item = [(user, hash_), {'salt': hash_[4:12], 'count': 1 << ITOA64.index(hash_[3]), 'prefix': hash_[:12]}]
+                        else:
+                            warnMsg = "invalid hash '%s'" % hash_
+                            logger.warn(warnMsg)
 
                     if item and hash_ not in keys:
                         resumed = hashDBRetrieve(hash_)
@@ -771,7 +789,7 @@ def dictionaryAttack(attack_dict):
 
                 except Exception, ex:
                     warnMsg = "there was a problem while loading dictionaries"
-                    warnMsg += " ('%s')" % ex.message
+                    warnMsg += " ('%s')" % getSafeExString(ex)
                     logger.critical(warnMsg)
 
             message = "do you want to use common password suffixes? (slow!) [y/N] "

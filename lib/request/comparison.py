@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -52,6 +52,8 @@ def _comparison(page, headers, code, getRatioValue, pageLength):
 
     if page is None and pageLength is None:
         return None
+
+    count = 0
 
     seqMatcher = threadData.seqMatcher
     seqMatcher.set_seq1(kb.pageTemplate)
@@ -122,15 +124,21 @@ def _comparison(page, headers, code, getRatioValue, pageLength):
         seq1 = seq1.replace(REFLECTED_VALUE_MARKER, "")
         seq2 = seq2.replace(REFLECTED_VALUE_MARKER, "")
 
-        count = 0
         while count < min(len(seq1), len(seq2)):
             if seq1[count] == seq2[count]:
                 count += 1
             else:
                 break
+
         if count:
-            seq1 = seq1[count:]
-            seq2 = seq2[count:]
+            try:
+                _seq1 = seq1[count:]
+                _seq2 = seq2[count:]
+            except MemoryError:
+                pass
+            else:
+                seq1 = _seq1
+                seq2 = _seq2
 
         while True:
             try:
@@ -153,7 +161,7 @@ def _comparison(page, headers, code, getRatioValue, pageLength):
     # If the url is stable and we did not set yet the match ratio and the
     # current injected value changes the url page content
     if kb.matchRatio is None:
-        if ratio >= LOWER_RATIO_BOUND and ratio <= UPPER_RATIO_BOUND:
+        if (count or ratio >= LOWER_RATIO_BOUND) and ratio <= UPPER_RATIO_BOUND:
             kb.matchRatio = ratio
             logger.debug("setting match ratio for current parameter to %.3f" % kb.matchRatio)
 

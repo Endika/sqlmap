@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -11,6 +11,7 @@ import sqlite3
 import threading
 import time
 
+from lib.core.common import getSafeExString
 from lib.core.common import getUnicode
 from lib.core.common import serializeObject
 from lib.core.common import unserializeObject
@@ -37,9 +38,10 @@ class HashDB(object):
                 connection = sqlite3.connect(self.filepath, timeout=3, isolation_level=None)
                 threadData.hashDBCursor = connection.cursor()
                 threadData.hashDBCursor.execute("CREATE TABLE IF NOT EXISTS storage (id INTEGER PRIMARY KEY, value TEXT)")
+                connection.commit()
             except Exception, ex:
                 errMsg = "error occurred while opening a session "
-                errMsg += "file '%s' ('%s')" % (self.filepath, ex)
+                errMsg += "file '%s' ('%s')" % (self.filepath, getSafeExString(ex))
                 raise SqlmapDataException(errMsg)
 
         return threadData.hashDBCursor
@@ -68,6 +70,7 @@ class HashDB(object):
 
     def retrieve(self, key, unserialize=False):
         retVal = None
+
         if key and (self._write_cache or os.path.isfile(self.filepath)):
             hash_ = HashDB.hashKey(key)
             retVal = self._write_cache.get(hash_)
@@ -77,15 +80,24 @@ class HashDB(object):
                         for row in self.cursor.execute("SELECT value FROM storage WHERE id=?", (hash_,)):
                             retVal = row[0]
                     except sqlite3.OperationalError, ex:
-                        if not "locked" in ex.message:
+                        if not "locked" in getSafeExString(ex):
                             raise
                     except sqlite3.DatabaseError, ex:
-                        errMsg = "error occurred while accessing session file '%s' ('%s'). " % (self.filepath, ex)
+                        errMsg = "error occurred while accessing session file '%s' ('%s'). " % (self.filepath, getSafeExString(ex))
                         errMsg += "If the problem persists please rerun with `--flush-session`"
                         raise SqlmapDataException, errMsg
                     else:
                         break
-        return retVal if not unserialize else unserializeObject(retVal)
+
+        if unserialize:
+            try:
+                retVal = unserializeObject(retVal)
+            except:
+                warnMsg = "error occurred while unserializing value for session key '%s'. " % key
+                warnMsg += "If the problem persists please rerun with `--flush-session`"
+                logger.warn(warnMsg)
+
+        return retVal
 
     def write(self, key, value, serialize=False):
         if key:
@@ -127,7 +139,7 @@ class HashDB(object):
 
                         if retries == 0:
                             warnMsg = "there has been a problem while writing to "
-                            warnMsg += "the session file ('%s')" % ex.message
+                            warnMsg += "the session file ('%s')" % getSafeExString(ex)
                             logger.warn(warnMsg)
 
                         if retries >= HASHDB_FLUSH_RETRIES:

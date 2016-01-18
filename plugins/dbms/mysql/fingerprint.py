@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -169,7 +169,7 @@ class Fingerprint(GenericFingerprint):
             infoMsg = "confirming %s" % DBMS.MYSQL
             logger.info(infoMsg)
 
-            result = inject.checkBooleanExpression("USER() LIKE USER()")
+            result = inject.checkBooleanExpression("SESSION_USER() LIKE USER()")
 
             if not result:
                 warnMsg = "the back-end DBMS is not %s" % DBMS.MYSQL

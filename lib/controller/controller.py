@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -24,7 +24,7 @@ from lib.core.common import dataToStdout
 from lib.core.common import extractRegexResult
 from lib.core.common import getFilteredPageContent
 from lib.core.common import getPublicTypeMembers
-from lib.core.common import getUnicode
+from lib.core.common import getSafeExString
 from lib.core.common import hashDBRetrieve
 from lib.core.common import hashDBWrite
 from lib.core.common import intersect
@@ -316,8 +316,8 @@ def start():
             if conf.multipleTargets:
                 hostCount += 1
 
-                if conf.forms:
-                    message = "[#%d] form:\n%s %s" % (hostCount, conf.method or HTTPMETHOD.GET, targetUrl)
+                if conf.forms and conf.method:
+                    message = "[#%d] form:\n%s %s" % (hostCount, conf.method, targetUrl)
                 else:
                     message = "URL %d:\n%s %s%s" % (hostCount, HTTPMETHOD.GET, targetUrl, " (PageRank: %s)" % get_pagerank(targetUrl) if conf.googleDork and conf.pageRank else "")
 
@@ -327,7 +327,7 @@ def start():
                 if conf.data is not None:
                     message += "\n%s data: %s" % ((conf.method if conf.method != HTTPMETHOD.GET else conf.method) or HTTPMETHOD.POST, urlencode(conf.data) if conf.data else "")
 
-                if conf.forms:
+                if conf.forms and conf.method:
                     if conf.method == HTTPMETHOD.GET and targetUrl.find("?") == -1:
                         continue
 
@@ -421,6 +421,7 @@ def start():
                     skip |= (place == PLACE.USER_AGENT and intersect(USER_AGENT_ALIASES, conf.skip, True) not in ([], None))
                     skip |= (place == PLACE.REFERER and intersect(REFERER_ALIASES, conf.skip, True) not in ([], None))
                     skip |= (place == PLACE.COOKIE and intersect(PLACE.COOKIE, conf.skip, True) not in ([], None))
+                    skip |= (place == PLACE.HOST and intersect(PLACE.HOST, conf.skip, True) not in ([], None))
 
                     skip &= not (place == PLACE.USER_AGENT and intersect(USER_AGENT_ALIASES, conf.testParameter, True))
                     skip &= not (place == PLACE.REFERER and intersect(REFERER_ALIASES, conf.testParameter, True))
@@ -648,7 +649,7 @@ def start():
             raise
 
         except SqlmapBaseException, ex:
-            errMsg = getUnicode(ex.message)
+            errMsg = getSafeExString(ex)
 
             if conf.multipleTargets:
                 errMsg += ", skipping to the next %s" % ("form" if conf.forms else "URL")

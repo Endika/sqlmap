@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -86,6 +86,7 @@ from lib.core.exception import SqlmapSilentQuitException
 from lib.core.exception import SqlmapSyntaxException
 from lib.core.exception import SqlmapSystemException
 from lib.core.exception import SqlmapUserQuitException
+from lib.core.exception import SqlmapValueException
 from lib.core.log import LOGGER_HANDLER
 from lib.core.optiondict import optDict
 from lib.core.settings import BANNER
@@ -202,7 +203,7 @@ class Format(object):
         if versions is None and Backend.getVersionList():
             versions = Backend.getVersionList()
 
-        return Backend.getDbms() if versions is None else "%s %s" % (Backend.getDbms(), " and ".join(v for v in versions))
+        return Backend.getDbms() if versions is None else "%s %s" % (Backend.getDbms(), " and ".join(filter(None, versions)))
 
     @staticmethod
     def getErrorParsedDBMSes():
@@ -471,15 +472,17 @@ class Backend:
 
     @staticmethod
     def getVersion():
-        if len(kb.dbmsVersion) > 0:
-            return kb.dbmsVersion[0]
+        versions = filter(None, flattenValue(kb.dbmsVersion))
+        if not isNoneValue(versions):
+            return versions[0]
         else:
             return None
 
     @staticmethod
     def getVersionList():
-        if len(kb.dbmsVersion) > 0:
-            return kb.dbmsVersion
+        versions = filter(None, flattenValue(kb.dbmsVersion))
+        if not isNoneValue(versions):
+            return versions
         else:
             return None
 
@@ -850,7 +853,7 @@ def dataToTrafficFile(data):
         conf.trafficFP.flush()
     except IOError, ex:
         errMsg = "something went wrong while trying "
-        errMsg += "to write to the traffic file '%s' ('%s')" % (conf.trafficFile, ex)
+        errMsg += "to write to the traffic file '%s' ('%s')" % (conf.trafficFile, getSafeExString(ex))
         raise SqlmapSystemException(errMsg)
 
 def dataToDumpFile(dumpFile, data):
@@ -879,7 +882,7 @@ def dataToOutFile(filename, data):
                 f.write(data)
         except IOError, ex:
             errMsg = "something went wrong while trying to write "
-            errMsg += "to the output file ('%s')" % ex.message
+            errMsg += "to the output file ('%s')" % getSafeExString(ex)
             raise SqlmapGenericException(errMsg)
 
     return retVal
@@ -909,14 +912,14 @@ def readInput(message, default=None, checkBatch=True):
             answer = item.split('=')[1] if len(item.split('=')) > 1 else None
             if answer and question.lower() in message.lower():
                 retVal = getUnicode(answer, UNICODE_ENCODING)
+            elif answer is None and retVal:
+                retVal = "%s,%s" % (retVal, getUnicode(item, UNICODE_ENCODING))
 
-                infoMsg = "%s%s" % (message, retVal)
-                logger.info(infoMsg)
+    if retVal:
+        dataToStdout("\r%s%s\n" % (message, retVal), forceOutput=True, bold=True)
 
-                debugMsg = "used the given answer"
-                logger.debug(debugMsg)
-
-                break
+        debugMsg = "used the given answer"
+        logger.debug(debugMsg)
 
     if retVal is None:
         if checkBatch and conf.get("batch"):
@@ -1272,7 +1275,7 @@ def parseTargetUrl():
     try:
         urlSplit = urlparse.urlsplit(conf.url)
     except ValueError, ex:
-        errMsg = "invalid URL '%s' has been given ('%s'). " % (conf.url, ex)
+        errMsg = "invalid URL '%s' has been given ('%s'). " % (conf.url, getSafeExString(ex))
         errMsg += "Please be sure that you don't have any leftover characters (e.g. '[' or ']') "
         errMsg += "in the hostname part"
         raise SqlmapGenericException(errMsg)
@@ -1369,7 +1372,7 @@ def expandAsteriskForColumns(expression):
 
     return expression
 
-def getLimitRange(count, dump=False, plusOne=False):
+def getLimitRange(count, plusOne=False):
     """
     Returns range of values used in limit/offset constructs
 
@@ -1381,12 +1384,11 @@ def getLimitRange(count, dump=False, plusOne=False):
     count = int(count)
     limitStart, limitStop = 1, count
 
-    if dump:
-        if isinstance(conf.limitStop, int) and conf.limitStop > 0 and conf.limitStop < limitStop:
-            limitStop = conf.limitStop
+    if isinstance(conf.limitStop, int) and conf.limitStop > 0 and conf.limitStop < limitStop:
+        limitStop = conf.limitStop
 
-        if isinstance(conf.limitStart, int) and conf.limitStart > 0 and conf.limitStart <= limitStop:
-            limitStart = conf.limitStart
+    if isinstance(conf.limitStart, int) and conf.limitStart > 0 and conf.limitStart <= limitStop:
+        limitStart = conf.limitStart
 
     retVal = xrange(limitStart, limitStop + 1) if plusOne else xrange(limitStart - 1, limitStop)
 
@@ -1622,12 +1624,23 @@ def safeStringFormat(format_, params):
                 index = retVal.find("%s", start)
                 retVal = retVal[:index] + getUnicode(param) + retVal[index + 2:]
         else:
+            if any('%s' in _ for _ in conf.parameters.values()):
+                parts = format_.split(' ')
+                for i in xrange(len(parts)):
+                    if PAYLOAD_DELIMITER in parts[i]:
+                        parts[i] = parts[i].replace(PAYLOAD_DELIMITER, "")
+                        parts[i] = "%s%s" % (parts[i], PAYLOAD_DELIMITER)
+                        break
+                format_ = ' '.join(parts)
+
             count = 0
             while True:
                 match = re.search(r"(\A|[^A-Za-z0-9])(%s)([^A-Za-z0-9]|\Z)", retVal)
                 if match:
                     if count >= len(params):
-                        raise Exception("wrong number of parameters during string formatting")
+                        warnMsg = "wrong number of parameters during string formatting. "
+                        warnMsg += "Please report by e-mail content \"%r | %r | %r\" to 'dev@sqlmap.org'" % (format_, params, retVal)
+                        raise SqlmapValueException(warnMsg)
                     else:
                         retVal = re.sub(r"(\A|[^A-Za-z0-9])(%s)([^A-Za-z0-9]|\Z)", r"\g<1>%s\g<3>" % params[count], retVal, 1)
                         count += 1
@@ -1727,7 +1740,7 @@ def posixToNtSlashes(filepath):
     'C:\\\\Windows'
     """
 
-    return filepath.replace('/', '\\')
+    return filepath.replace('/', '\\') if filepath else filepath
 
 def ntToPosixSlashes(filepath):
     """
@@ -1738,7 +1751,7 @@ def ntToPosixSlashes(filepath):
     'C:/Windows'
     """
 
-    return filepath.replace('\\', '/')
+    return filepath.replace('\\', '/') if filepath else filepath
 
 def isHexEncodedString(subject):
     """
@@ -1810,7 +1823,7 @@ def parseXmlFile(xmlFile, handler):
             parse(stream, handler)
     except (SAXParseException, UnicodeError), ex:
         errMsg = "something seems to be wrong with "
-        errMsg += "the file '%s' ('%s'). Please make " % (xmlFile, ex)
+        errMsg += "the file '%s' ('%s'). Please make " % (xmlFile, getSafeExString(ex))
         errMsg += "sure that you haven't made any changes to it"
         raise SqlmapInstallationException, errMsg
 
@@ -1866,8 +1879,13 @@ def readCachedFileContent(filename, mode='rb'):
         with kb.locks.cache:
             if filename not in kb.cache.content:
                 checkFile(filename)
-                with openFile(filename, mode) as f:
-                    kb.cache.content[filename] = f.read()
+                try:
+	                with openFile(filename, mode) as f:
+	                    kb.cache.content[filename] = f.read()
+                except (IOError, OSError, MemoryError), ex:
+                    errMsg = "something went wrong while trying "
+                    errMsg += "to read the content of file '%s' ('%s')" % (filename, getSafeExString(ex))
+                    raise SqlmapSystemException(errMsg)
 
     return kb.cache.content[filename]
 
@@ -1985,7 +2003,7 @@ def getFileItems(filename, commentPrefix='#', unicode_=True, lowercase=False, un
                         retVal.append(line)
     except (IOError, OSError, MemoryError), ex:
         errMsg = "something went wrong while trying "
-        errMsg += "to read the content of file '%s' ('%s')" % (filename, ex)
+        errMsg += "to read the content of file '%s' ('%s')" % (filename, getSafeExString(ex))
         raise SqlmapSystemException(errMsg)
 
     return retVal if not unique else retVal.keys()
@@ -2203,16 +2221,16 @@ def wasLastResponseDelayed():
     # response times should be inside +-7*stdev([normal response times])
     # Math reference: http://www.answers.com/topic/standard-deviation
 
-    deviation = stdev(kb.responseTimes)
+    deviation = stdev(kb.responseTimes.get(kb.responseTimeMode, []))
     threadData = getCurrentThreadData()
 
     if deviation and not conf.direct:
-        if len(kb.responseTimes) < MIN_TIME_RESPONSES:
+        if len(kb.responseTimes[kb.responseTimeMode]) < MIN_TIME_RESPONSES:
             warnMsg = "time-based standard deviation method used on a model "
             warnMsg += "with less than %d response times" % MIN_TIME_RESPONSES
             logger.warn(warnMsg)
 
-        lowerStdLimit = average(kb.responseTimes) + TIME_STDEV_COEFF * deviation
+        lowerStdLimit = average(kb.responseTimes[kb.responseTimeMode]) + TIME_STDEV_COEFF * deviation
         retVal = (threadData.lastQueryDuration >= max(MIN_VALID_DELAYED_RESPONSE, lowerStdLimit))
 
         if not kb.testMode and retVal:
@@ -2489,7 +2507,10 @@ def extractTextTagContent(page):
     page = page or ""
 
     if REFLECTED_VALUE_MARKER in page:
-        page = re.sub(r"(?si)[^\s>]*%s[^\s<]*" % REFLECTED_VALUE_MARKER, "", page)
+        try:
+            page = re.sub(r"(?i)[^\s>]*%s[^\s<]*" % REFLECTED_VALUE_MARKER, "", page)
+        except MemoryError:
+            page = page.replace(REFLECTED_VALUE_MARKER, "")
 
     return filter(None, (_.group('result').strip() for _ in re.finditer(TEXT_TAG_REGEX, page)))
 
@@ -2681,7 +2702,7 @@ def parseSqliteTableSchema(value):
         table = {}
         columns = {}
 
-        for match in re.finditer(r"(\w+)\s+(INT|INTEGER|TINYINT|SMALLINT|MEDIUMINT|BIGINT|UNSIGNED BIG INT|INT2|INT8|INTEGER|CHARACTER|VARCHAR|VARYING CHARACTER|NCHAR|NATIVE CHARACTER|NVARCHAR|TEXT|CLOB|TEXT|BLOB|NONE|REAL|DOUBLE|DOUBLE PRECISION|FLOAT|REAL|NUMERIC|DECIMAL|BOOLEAN|DATE|DATETIME|NUMERIC)\b", value, re.I):
+        for match in re.finditer(r"(\w+)[\"'`]?\s+(INT|INTEGER|TINYINT|SMALLINT|MEDIUMINT|BIGINT|UNSIGNED BIG INT|INT2|INT8|INTEGER|CHARACTER|VARCHAR|VARYING CHARACTER|NCHAR|NATIVE CHARACTER|NVARCHAR|TEXT|CLOB|LONGTEXT|BLOB|NONE|REAL|DOUBLE|DOUBLE PRECISION|FLOAT|REAL|NUMERIC|DECIMAL|BOOLEAN|DATE|DATETIME|NUMERIC)\b", value, re.I):
             columns[match.group(1)] = match.group(2)
 
         table[conf.tbl] = columns
@@ -2800,7 +2821,13 @@ def unArrayizeValue(value):
     """
 
     if isListLike(value):
-        value = value[0] if len(value) > 0 else None
+        if not value:
+            value = None
+        elif len(value) == 1 and not isListLike(value[0]):
+            value = value[0]
+        else:
+            _ = filter(lambda _: _ is not None, (_ for _ in flattenValue(value)))
+            value = _[0] if len(_) > 0 else None
 
     return value
 
@@ -2921,7 +2948,14 @@ def decodeIntToUnicode(value):
                 _ = "%x" % value
                 if len(_) % 2 == 1:
                     _ = "0%s" % _
-                retVal = getUnicode(hexdecode(_), encoding="UTF-16" if Backend.isDbms(DBMS.MSSQL) else None)
+                raw = hexdecode(_)
+
+                if Backend.isDbms(DBMS.MSSQL):
+                    retVal = getUnicode(raw, "UTF-16-BE")
+                elif Backend.getIdentifiedDbms() in (DBMS.PGSQL, DBMS.ORACLE):
+                    retVal = unichr(value)
+                else:
+                    retVal = getUnicode(raw, conf.charset)
             else:
                 retVal = getUnicode(chr(value))
         except:
@@ -3008,7 +3042,7 @@ def createGithubIssue(errMsg, excMsg):
         else:
             warnMsg = "something went wrong while creating a Github issue"
             if ex:
-                warnMsg += " ('%s')" % ex
+                warnMsg += " ('%s')" % getSafeExString(ex)
             if "Unauthorized" in warnMsg:
                 warnMsg += ". Please update to the latest revision"
             logger.warn(warnMsg)
@@ -3020,7 +3054,7 @@ def maskSensitiveData(msg):
 
     retVal = getUnicode(msg)
 
-    for item in filter(None, map(lambda x: conf.get(x), ("hostname", "googleDork", "authCred", "proxyCred", "tbl", "db", "col", "user", "cookie", "proxy", "rFile", "wFile", "dFile"))):
+    for item in filter(None, map(lambda x: conf.get(x), ("hostname", "data", "googleDork", "authCred", "proxyCred", "tbl", "db", "col", "user", "cookie", "proxy", "rFile", "wFile", "dFile"))):
         regex = SENSITIVE_DATA_REGEX % re.sub("(\W)", r"\\\1", getUnicode(item))
         while extractRegexResult(regex, retVal):
             value = extractRegexResult(regex, retVal)
@@ -3536,7 +3570,7 @@ def findPageForms(content, url, raise_=False, addToTargets=False):
 
     try:
         forms = ParseResponse(response, backwards_compat=False)
-    except UnicodeError:
+    except (UnicodeError, ValueError):
         pass
     except ParseError:
         if "<html" in (content or ""):
@@ -3567,7 +3601,7 @@ def findPageForms(content, url, raise_=False, addToTargets=False):
                 request = form.click()
             except (ValueError, TypeError), ex:
                 errMsg = "there has been a problem while "
-                errMsg += "processing page forms ('%s')" % ex
+                errMsg += "processing page forms ('%s')" % getSafeExString(ex)
                 if raise_:
                     raise SqlmapGenericException(errMsg)
                 else:
@@ -3670,7 +3704,7 @@ def evaluateCode(code, variables=None):
     except KeyboardInterrupt:
         raise
     except Exception, ex:
-        errMsg = "an error occurred while evaluating provided code ('%s') " % ex.message
+        errMsg = "an error occurred while evaluating provided code ('%s') " % getSafeExString(ex)
         raise SqlmapGenericException(errMsg)
 
 def serializeObject(object_):
@@ -3738,8 +3772,12 @@ def decodeHexValue(value, raw=False):
 
     def _(value):
         retVal = value
-        if value and isinstance(value, basestring) and len(value) % 2 == 0:
-            retVal = hexdecode(retVal)
+        if value and isinstance(value, basestring):
+            if len(value) % 2 != 0:
+                retVal = "%s?" % hexdecode(value[:-1])
+                singleTimeWarnMessage("there was a problem decoding value '%s' from expected hexadecimal form" % value)
+            else:
+                retVal = hexdecode(value)
 
             if not kb.binaryField and not raw:
                 if Backend.isDbms(DBMS.MSSQL) and value.startswith("0x"):
@@ -3813,7 +3851,7 @@ def hashDBRetrieve(key, unserialize=False, checkConf=False):
 
     _ = "%s%s%s" % (conf.url or "%s%s" % (conf.hostname, conf.port), key, HASHDB_MILESTONE_VALUE)
     retVal = conf.hashDB.retrieve(_, unserialize) if kb.resumeValues and not (checkConf and any((conf.flushSession, conf.freshQueries))) else None
-    if not kb.inferenceMode and not kb.fileReadMode and any(_ in (retVal or "") for _ in (PARTIAL_VALUE_MARKER, PARTIAL_HEX_VALUE_MARKER)):
+    if not kb.inferenceMode and not kb.fileReadMode and isinstance(retVal, basestring) and any(_ in retVal for _ in (PARTIAL_VALUE_MARKER, PARTIAL_HEX_VALUE_MARKER)):
         retVal = None
     return retVal
 
@@ -3836,7 +3874,7 @@ def resetCookieJar(cookieJar):
                 os.close(handle)
 
                 # Reference: http://www.hashbangcode.com/blog/netscape-http-cooke-file-parser-php-584.html
-                with open(filename, "w+b") as f:
+                with openFile(filename, "w+b") as f:
                     f.write("%s\n" % NETSCAPE_FORMAT_HEADER_COOKIES)
                     for line in lines:
                         _ = line.split("\t")
@@ -3870,13 +3908,18 @@ def decloakToTemp(filename):
     """
 
     content = decloak(filename)
-    _ = os.path.split(filename[:-1])[-1]
+
+    _ = utf8encode(os.path.split(filename[:-1])[-1])
+
     prefix, suffix = os.path.splitext(_)
     prefix = prefix.split(os.extsep)[0]
+
     handle, filename = tempfile.mkstemp(prefix=prefix, suffix=suffix)
     os.close(handle)
+
     with open(filename, "w+b") as f:
         f.write(content)
+
     return filename
 
 def prioritySortColumns(columns):
@@ -3977,3 +4020,18 @@ def pollProcess(process, suppress_errors=False):
                     dataToStdout(" quit unexpectedly with return code %d\n" % returncode)
 
             break
+
+def getSafeExString(ex, encoding=None):
+    """
+    Safe way how to get the proper exception represtation as a string
+    (Note: errors to be avoided: 1) "%s" % Exception(u'\u0161') and 2) "%s" % str(Exception(u'\u0161'))
+    """
+
+    retVal = ex
+
+    if getattr(ex, "message", None):
+        retVal = ex.message
+    elif getattr(ex, "msg", None):
+        retVal = ex.msg
+
+    return getUnicode(retVal, encoding=encoding)

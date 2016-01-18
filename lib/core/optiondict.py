@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -37,7 +37,7 @@ optDict = {
                                "headers":           "string",
                                "authType":          "string",
                                "authCred":          "string",
-                               "authPrivate":       "string",
+                               "authFile":          "string",
                                "proxy":             "string",
                                "proxyCred":         "string",
                                "proxyFile":         "string",
@@ -205,6 +205,7 @@ optDict = {
                                "saveConfig":        "string",
                                "scope":             "string",
                                "testFilter":        "string",
+                               "testSkip":          "string",
                                "updateAll":         "boolean",
                              },
 
@@ -226,11 +227,13 @@ optDict = {
                              },
             "Hidden": {
                                "dummy":             "boolean",
+                               "disablePrecon":     "boolean",
                                "binaryFields":      "string",
                                "profile":           "boolean",
                                "cpuThrottle":       "integer",
                                "forceDns":          "boolean",
                                "identifyWaf":       "boolean",
+                               "skipWaf":           "boolean",
                                "ignore401":         "boolean",
                                "smokeTest":         "boolean",
                                "liveTest":          "boolean",
